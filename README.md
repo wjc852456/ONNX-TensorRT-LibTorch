@@ -4,7 +4,21 @@ This project is based on https://github.com/dusty-nv/jetson-inference#api-refere
 
 With pretrained model exported as .onnx model, runtime engines are created and deployed along with **TensorRT** and **LibTorch** on NVIDIA Geforce or embedded Jetson platforms.
 
-## Pre-Trained Models
+### Setup
+modify build.cmake to specify the path of TRT_INCLUDE_DIR and TORCH_LIB_PATH (if TensorRT was pre-installed like in Jetson, TRT_INCLUDE_DIR should not be specified), then run the commands below:
+
+$ mkdir build
+
+$ cp build.cmake build
+
+$ cd build
+
+$ cmake .. -DCMAKE_BUILD_TYPE=Release
+
+$ make 
+
+
+### Object Detection
 
 
 #### Object Detection
