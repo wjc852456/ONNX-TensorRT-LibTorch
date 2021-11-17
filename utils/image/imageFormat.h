@@ -85,6 +85,12 @@ enum imageFormat
 	IMAGE_DEFAULT=IMAGE_RGBA32F		/**< Default format (IMAGE_RGBA32F) */
 };
 
+enum imageResizeType
+{
+	INTER_LINEAR=0, // default
+	INTER_NEAREST
+};
+
 /**
  * The imageBaseType enum is used to identify the base data type of an
  * imageFormat - either uint8 or float.  For example, the IMAGE_RGB8 

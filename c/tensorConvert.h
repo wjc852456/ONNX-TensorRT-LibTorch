@@ -53,13 +53,13 @@ cudaError_t launchTensorNormMeanBGR(void* input, imageFormat format, size_t inpu
 							int top, int bottom, int left, int right,
 						    float* output, size_t outputWidth, size_t outputHeight, 
 						    const float2& range, const float3& mean, const float3& stdDev,
-						    cudaStream_t stream=NULL);
+						    imageResizeType resizeType=INTER_LINEAR, cudaStream_t stream=NULL);
 
 cudaError_t launchTensorNormMeanRGB(void* input, imageFormat format, size_t inputWidth, size_t inputHeight,
 							int top, int bottom, int left, int right,
 						    float* output, size_t outputWidth, size_t outputHeight, 
 						    const float2& range, const float3& mean, const float3& stdDev,
-						    cudaStream_t stream=NULL);
+						    imageResizeType resizeType=INTER_LINEAR, cudaStream_t stream=NULL);
 
 cudaError_t cudaLetterbox(void* input, imageFormat format, float* output, const uint32_t height, const uint32_t width, const uint32_t newHeight, const uint32_t newWidth, bool scaleUp=true);
 

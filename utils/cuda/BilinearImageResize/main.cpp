@@ -16,7 +16,7 @@ int main(int argc, char **argv)
 	cv::Mat image;
 	cv::Mat image_resized_gpu;
 	cv::Mat image_resized_cpu;
-	cv::Mat image_resized_cv;
+	cv::Mat image_resized_cv2;
 	int32_t *argb = NULL;
 	int32_t *argb_res_gpu = NULL;
 	int32_t *argb_res_cpu = NULL;
@@ -73,8 +73,8 @@ int main(int argc, char **argv)
 	cpu_startTime = clock();
 	for (int i = 0; i < RESIZE_CALLS_NUM; i++)
 	{
-		//resize(image, image_resized_cv, newSz, cv::INTER_LINEAR);
-		resize(image, image_resized_cv, newSz, 0, 0);
+		//resize(image, image_resized_cv2, newSz, cv::INTER_LINEAR);
+		resize(image, image_resized_cv2, newSz, 0, 0);
 	}
 	cpu_endTime = clock();
 	cpu_ElapseTime = ((double)(cpu_endTime - cpu_startTime) / (double)CLOCKS_PER_SEC);
@@ -90,7 +90,7 @@ int main(int argc, char **argv)
 	imwrite("Risized_gpu.jpg",image_resized_gpu);
 	imshow("Resized_CPU", image_resized_cpu);
 	imwrite("Resized_CPU.jpg",image_resized_cpu);
-	imwrite("Resized_CV.jpg",image_resized_cv);
+	imwrite("Resized_CV.jpg",image_resized_cv2);
 	waitKey(0);
 
 	//free memory

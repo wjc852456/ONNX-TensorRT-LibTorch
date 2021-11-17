@@ -22,12 +22,11 @@
  
 #include "tensorConvert.h"
 
-#include <algorithm>
 #include "cudaMappedMemory.h"
 #include <thrust/device_ptr.h>
 #include <thrust/fill.h>
 
-
+#define MIN(x, y)  ( ((x) < (y)) ? (x) : (y) )
 #define ROUND(x) ((int)(x+0.5))
 
 // gpuTensorMean
@@ -275,7 +274,7 @@ template<> void cudaMemset<int>(int* input, const uint32_t size, const int value
 }
 
 template<typename T, bool isBGR>
-__global__ void gpuTensorNormMean( T* input, int iWidth, int top, int bottom, int left, int right, float* output, int oWidth, int oHeight, float2 scale, float multiplier, float min_value, const float3 mean, const float3 stdDev )
+__global__ void gpuTensorNormMeanInterNearest( T* input, int iWidth, int top, int bottom, int left, int right, float* output, int oWidth, int oHeight, float2 scale, float multiplier, float min_value, const float3 mean, const float3 stdDev )
 {
 	const int x = blockIdx.x * blockDim.x + threadIdx.x;
 	const int y = blockIdx.y * blockDim.y + threadIdx.y;
@@ -299,40 +298,95 @@ __global__ void gpuTensorNormMean( T* input, int iWidth, int top, int bottom, in
 	output[n * 2 + m] = ((rgb.z * multiplier + min_value) - mean.z) / stdDev.z;
 }
 
+template<typename T, bool isBGR>
+__global__ void gpuTensorNormMeanInterLinear( T* input, int iWidth, int top, int bottom, int left, int right, float* output, int oWidth, int oHeight, float2 scale, float multiplier, float min_value, const float3 mean, const float3 stdDev )
+{
+	const int x = blockIdx.x * blockDim.x + threadIdx.x;
+	const int y = blockIdx.y * blockDim.y + threadIdx.y;
+
+	if( x >= oWidth || y >= oHeight )
+		return;
+
+	const int n = (oWidth+left+right) * (oHeight+top+bottom);
+	const int m = top * (oWidth+left+right) + y * (oWidth+left+right) + (x+left);
+
+	const int dx = (int)((x + 0.5f) * scale.x - 0.5f);
+	const int dy = (int)((y + 0.5f) * scale.y - 0.5f);
+	const float x_diff = ((x + 0.5f) * scale.x - 0.5f) - dx;
+	const float y_diff = ((y + 0.5f) * scale.y - 0.5f) - dy;
+	const int32_t index = dy * iWidth + dx;
+	const T a = input[index];
+	const T b = input[index + 1];
+	const T c = input[index + iWidth];
+	const T d = input[index + iWidth + 1];
+
+	const float3 rgb_a = isBGR ? make_float3(a.z, a.y, a.x) : make_float3(a.x, a.y, a.z);
+	const float3 rgb_b = isBGR ? make_float3(b.z, b.y, b.x) : make_float3(b.x, b.y, b.z);
+	const float3 rgb_c = isBGR ? make_float3(c.z, c.y, c.x) : make_float3(c.x, c.y, c.z);
+	const float3 rgb_d = isBGR ? make_float3(d.z, d.y, d.x) : make_float3(d.x, d.y, d.z);
+
+	const float R = rgb_a.x*(1 - x_diff)*(1 - y_diff) + rgb_b.x*(x_diff)*(1 - y_diff) + rgb_c.x*(1 - x_diff)*(y_diff) + rgb_d.x*(x_diff*y_diff);
+	const float G = rgb_a.y*(1 - x_diff)*(1 - y_diff) + rgb_b.y*(x_diff)*(1 - y_diff) + rgb_c.y*(1 - x_diff)*(y_diff) + rgb_d.y*(x_diff*y_diff);
+	const float B = rgb_a.z*(1 - x_diff)*(1 - y_diff) + rgb_b.z*(x_diff)*(1 - y_diff) + rgb_c.z*(1 - x_diff)*(y_diff) + rgb_d.z*(x_diff*y_diff);
+
+	output[n * 0 + m] = ((R * multiplier + min_value) - mean.x) / stdDev.x;
+	output[n * 1 + m] = ((G * multiplier + min_value) - mean.y) / stdDev.y;
+	output[n * 2 + m] = ((B * multiplier + min_value) - mean.z) / stdDev.z;
+}
+
 template<bool isBGR>
 cudaError_t launchTensorNormMean( void* input, imageFormat format, size_t inputWidth, size_t inputHeight,
 							int top, int bottom, int left, int right,
 						    float* output, size_t outputWidth, size_t outputHeight, 
 						    const float2& range, const float3& mean, const float3& stdDev,
-						    cudaStream_t stream )
+						    imageResizeType resizeType, cudaStream_t stream )
 {
 	if( !input || !output )
 		return cudaErrorInvalidDevicePointer;
 
-	if( inputWidth == 0 || outputWidth == 0 || inputHeight == 0 || outputHeight == 0 )
+	if( inputWidth == 0 || inputHeight == 0 || outputWidth == 0 || outputHeight == 0 )
 		return cudaErrorInvalidValue;
 
 	const float2 scale = make_float2( float(inputWidth) / float(outputWidth),
 							    float(inputHeight) / float(outputHeight) );
 
 	const float multiplier = (range.y - range.x) / 255.0f;
-	//const float multiplier = (range.y - range.x);
 	// launch kernel
 	const dim3 blockDim(8, 8);
 	const dim3 gridDim(iDivUp(outputWidth,blockDim.x), iDivUp(outputHeight,blockDim.y));
 
-	if( format == IMAGE_RGB8 )
-		gpuTensorNormMean<uchar3, isBGR><<<gridDim, blockDim, 0, stream>>>((uchar3*)input, inputWidth, top, bottom, left, right,
-																			output, outputWidth, outputHeight, scale, multiplier, 0.0f, mean, stdDev);
-	else if( format == IMAGE_RGBA8 )
-		gpuTensorNormMean<uchar4, isBGR><<<gridDim, blockDim, 0, stream>>>((uchar4*)input, inputWidth, top, bottom, left, right,
-																			output, outputWidth, outputHeight, scale, multiplier, 0.0f, mean, stdDev);
-	else if( format == IMAGE_RGB32F )
-		gpuTensorNormMean<float3, isBGR><<<gridDim, blockDim, 0, stream>>>((float3*)input, inputWidth, top, bottom, left, right,
-																			output, outputWidth, outputHeight, scale, multiplier, 0.0f, mean, stdDev);
-	else if( format == IMAGE_RGBA32F )
-		gpuTensorNormMean<float4, isBGR><<<gridDim, blockDim, 0, stream>>>((float4*)input, inputWidth, top, bottom, left, right,
-																			output, outputWidth, outputHeight, scale, multiplier, 0.0f, mean, stdDev);
+	if( format == IMAGE_RGB8 ) {
+		if ( resizeType == INTER_LINEAR )
+			gpuTensorNormMeanInterLinear<uchar3, isBGR><<<gridDim, blockDim, 0, stream>>>((uchar3*)input, inputWidth, top, bottom, left, right,
+																				output, outputWidth, outputHeight, scale, multiplier, 0.0f, mean, stdDev);
+		else
+			gpuTensorNormMeanInterNearest<uchar3, isBGR><<<gridDim, blockDim, 0, stream>>>((uchar3*)input, inputWidth, top, bottom, left, right,
+																				output, outputWidth, outputHeight, scale, multiplier, 0.0f, mean, stdDev);
+	}
+	else if( format == IMAGE_RGBA8 ) {
+		if ( resizeType == INTER_LINEAR )
+			gpuTensorNormMeanInterLinear<uchar4, isBGR><<<gridDim, blockDim, 0, stream>>>((uchar4*)input, inputWidth, top, bottom, left, right,
+																				output, outputWidth, outputHeight, scale, multiplier, 0.0f, mean, stdDev);
+		else
+			gpuTensorNormMeanInterNearest<uchar4, isBGR><<<gridDim, blockDim, 0, stream>>>((uchar4*)input, inputWidth, top, bottom, left, right,
+																				output, outputWidth, outputHeight, scale, multiplier, 0.0f, mean, stdDev);
+	}
+	else if( format == IMAGE_RGB32F ) {
+		if ( resizeType == INTER_LINEAR )
+			gpuTensorNormMeanInterLinear<float3, isBGR><<<gridDim, blockDim, 0, stream>>>((float3*)input, inputWidth, top, bottom, left, right,
+																				output, outputWidth, outputHeight, scale, multiplier, 0.0f, mean, stdDev);
+		else
+			gpuTensorNormMeanInterNearest<float3, isBGR><<<gridDim, blockDim, 0, stream>>>((float3*)input, inputWidth, top, bottom, left, right,
+																				output, outputWidth, outputHeight, scale, multiplier, 0.0f, mean, stdDev);
+	}
+	else if( format == IMAGE_RGBA32F ) {
+		if ( resizeType == INTER_LINEAR )
+			gpuTensorNormMeanInterLinear<float4, isBGR><<<gridDim, blockDim, 0, stream>>>((float4*)input, inputWidth, top, bottom, left, right,
+																				output, outputWidth, outputHeight, scale, multiplier, 0.0f, mean, stdDev);
+		else
+			gpuTensorNormMeanInterNearest<float4, isBGR><<<gridDim, blockDim, 0, stream>>>((float4*)input, inputWidth, top, bottom, left, right,
+																				output, outputWidth, outputHeight, scale, multiplier, 0.0f, mean, stdDev);
+	}
 	else
 		return cudaErrorInvalidValue;
 
@@ -343,28 +397,28 @@ cudaError_t launchTensorNormMeanBGR(void* input, imageFormat format, size_t inpu
 							int top, int bottom, int left, int right,
 						    float* output, size_t outputWidth, size_t outputHeight, 
 						    const float2& range, const float3& mean, const float3& stdDev,
-						    cudaStream_t stream)
+						    imageResizeType resizeType, cudaStream_t stream)
 {
 	return launchTensorNormMean<true>(input, format, inputWidth, inputHeight, top, bottom, left, right, 
-	 								output, outputWidth, outputHeight, range, mean, stdDev, stream);
+	 								output, outputWidth, outputHeight, range, mean, stdDev, resizeType, stream);
 }
 
 cudaError_t launchTensorNormMeanRGB(void* input, imageFormat format, size_t inputWidth, size_t inputHeight,
 							int top, int bottom, int left, int right,
 						    float* output, size_t outputWidth, size_t outputHeight, 
 						    const float2& range, const float3& mean, const float3& stdDev,
-						    cudaStream_t stream)
+						    imageResizeType resizeType, cudaStream_t stream)
 {
 	return launchTensorNormMean<false>(input, format, inputWidth, inputHeight, top, bottom, left, right, 
-	 								output, outputWidth, outputHeight, range, mean, stdDev, stream);
+	 								output, outputWidth, outputHeight, range, mean, stdDev, resizeType, stream);
 }
 
 cudaError_t cudaLetterbox(void* input, imageFormat format, float* output, const uint32_t height, const uint32_t width, const uint32_t newHeight, const uint32_t newWidth, bool scaleUp)
 {
-	float r = std::min(newHeight*1.0f / height, newHeight*1.0f / width);
+	float r = MIN(newHeight*1.0f / height, newHeight*1.0f / width);
 	
 	if ( !scaleUp ) {
-		r = std::min(r, 1.0f);
+		r = MIN(r, 1.0f);
 	}
 	uint32_t newUnpadWidth  = ROUND(width*r);
 	uint32_t newUnpadHeight = ROUND(height*r);
@@ -380,8 +434,6 @@ cudaError_t cudaLetterbox(void* input, imageFormat format, float* output, const 
 		float3 stdDev = {1.0, 1.0, 1.0};
 		launchTensorNormMeanRGB(input, format, width, height, top, bottom, left, right, 
 	 								output, newUnpadWidth, newUnpadHeight, range, mean, stdDev);
-		//launchTensorNormMeanRGB(input, format, width, height, 0, 0, 0, 0, 
-	 	//							output, newUnpadWidth, newUnpadHeight, range, mean, stdDev);
 	}
 	
 	return CUDA(cudaGetLastError());
@@ -394,10 +446,10 @@ cudaError_t cudaImagePreprocess(const uint32_t height, const uint32_t width, con
 		return cudaErrorInvalidValue;
 	}
 
-	float r = std::min(newHeight*1.0f / height, newHeight*1.0f / width);
+	float r = MIN(newHeight*1.0f / height, newHeight*1.0f / width);
 	
 	if ( !scaleUp ) {
-		r = std::min(r, 1.0f);
+		r = MIN(r, 1.0f);
 	}
 
 	uint32_t newUnpadWidth  = ROUND(width*r);
@@ -422,9 +474,6 @@ cudaError_t cudaImagePreprocess(const uint32_t height, const uint32_t width, con
 		imgSizePad = (*outputHeight) * (*outputWidth) * 3;
 		cudaAllocMapped((void**)output, imgSizePad * sizeof(float));
 	}
-
-	//thrust::device_ptr<float> dev_ptr(*output);
-	//thrust::fill(dev_ptr, dev_ptr + imgSizePad, padValue);
 
 	cudaMemset(*output, imgSizePad, padValue);
 

@@ -2,8 +2,6 @@
 #include<torch/torch.h>
 #include<torch/script.h>
 
-#include <algorithm>
-
 #include "yolov5.h"
 #include "tensorConvert.h"
 
@@ -17,6 +15,7 @@
 
 using namespace torch::indexing;
 
+#define MIN(x, y)  ( ((x) < (y)) ? (x) : (y) )
 
 float YOLOV5Detections::sAnchors[] = {
     10, 13, 16, 30, 33, 23,
@@ -373,7 +372,7 @@ torch::Tensor YOLOV5Detections::xywh2xyxy(const torch::Tensor& x)
 bool YOLOV5Detections::ScaleCoords(const int ImgProcessHeight, const int ImgProcessWidth, const int ImgInputHeight, const int ImgInputWidth,
                                    torch::Tensor& dets)
 {
-    float gain = std::min(ImgProcessHeight * 1.0f / ImgInputHeight, ImgProcessWidth * 1.0f / ImgInputWidth);
+    float gain = MIN(ImgProcessHeight * 1.0f / ImgInputHeight, ImgProcessWidth * 1.0f / ImgInputWidth);
     float padW = (ImgProcessWidth - ImgInputWidth * gain) / 2;
     float padH = (ImgProcessHeight - ImgInputHeight * gain) / 2;
     dets.select(1, 0) -= padW;

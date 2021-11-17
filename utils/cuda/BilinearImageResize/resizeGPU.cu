@@ -7,10 +7,10 @@
 #define WARP_SIZE 32
 #define elemsPerThread 1
 
-int32_t* deviceDataResized;
-int32_t* deviceData;
-int32_t* hostOriginalImage;
-int32_t* hostResizedImage;
+int32_t* deviceDataResized = NULL;
+int32_t* deviceData = NULL;
+int32_t* hostOriginalImage = NULL;
+int32_t* hostResizedImage = NULL;
 
 void reAllocPinned(int w, int h, int w2, int h2, int32_t* dataSource)
 {
@@ -48,8 +48,8 @@ void deinitGPU()
 __global__ void SomeKernel(int32_t* originalImage, int32_t* resizedImage, int w, int h, int w2, int h2/*, float x_ratio, float y_ratio*/)
 {
 	__shared__ int32_t tile[1024];
-	const float x_ratio = ((float)(w - 1)) / w2;
-	const float y_ratio = ((float)(h - 1)) / h2;
+	const float x_ratio = ((float)(w)) / w2;
+	const float y_ratio = ((float)(h)) / h2;
 	//const int blockbx = blockIdx.y * w2 + blockIdx.x*BLOCK_DIM;
 	//unsigned int threadId = blockIdx.x * threadNum*elemsPerThread + threadIdx.x;
 	unsigned int threadId = blockIdx.x * threadNum*elemsPerThread + threadIdx.x*elemsPerThread;
@@ -59,13 +59,14 @@ __global__ void SomeKernel(int32_t* originalImage, int32_t* resizedImage, int w,
 	while((threadId < w2*h2 && shift<elemsPerThread))
 	{
 		const int32_t i = threadId / w2;
-		const int32_t j = threadId - (i*w2);
+		const int32_t j = threadId - (i * w2);
 		//float x_diff, y_diff, blue, red, green;
 		
-		const int32_t x = (int)(x_ratio * j);
-		const int32_t y = (int)(y_ratio * i);
-		const float x_diff = (x_ratio * j) - x;
-		const float y_diff = (y_ratio * i) - y;
+		const int32_t x = (int)((x_ratio * (j + 0.5f)) - 0.5f);
+		const int32_t y = (int)((y_ratio * (i + 0.5f)) - 0.5f);
+		
+		const float x_diff = ((x_ratio * (j + 0.5f)) - 0.5f) - x;
+		const float y_diff = ((y_ratio * (i + 0.5f)) - 0.5f) - y;
 		const int32_t index = (y*w + x);
 		const int32_t a = originalImage[index];
 		const int32_t b = originalImage[index + 1];
