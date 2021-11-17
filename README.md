@@ -17,9 +17,10 @@ $ cmake .. -DCMAKE_BUILD_TYPE=Release
 
 $ make 
 
-
 ### Object Detection
 
 | Network         |  runtime precision   | Object classes       | resolution | Jetson NX |
 | ----------------|--------------------  |----------------------|------------|-----------|
 | YOLOV5s         | FP16   | 4 | 1920*1080 |100FPS |
+
+![detection](https://github.com/wjc852456/ONNX-TensorRT-LibTorch/blob/main/detection.gif)

@@ -5,9 +5,7 @@ data/images/test
 data/images/G312
 data/videos
 data/points
-logs/
-engine_models/
-onnx_models/
+python/
 
 *.py
 *.pyc
